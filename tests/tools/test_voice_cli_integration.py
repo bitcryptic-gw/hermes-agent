@@ -10,6 +10,37 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _patch_tts_provider(mock_tts_fn=None, check_fn=None):
+    """Patch registries.get_tool_provider("tts") to return a mock provider.
+
+    The code resolves TTS via the plugin registry, not direct imports, so
+    patching the module-level function doesn't work.  This helper injects
+    a mock provider whose ``tool_functions["text_to_speech_tool"]`` is
+    *mock_tts_fn* so the code path in ``_voice_speak_response`` picks it up.
+
+    Returns a ``patch`` context-manager.
+    """
+    from agent.plugin_registries import ToolProviderEntry, registries
+
+    if mock_tts_fn is None:
+        mock_tts_fn = MagicMock(return_value='{"success": true}')
+
+    fake_provider = ToolProviderEntry(
+        name="tts",
+        tool_functions={"text_to_speech_tool": mock_tts_fn},
+        check_fn=check_fn,
+    )
+
+    orig = registries.get_tool_provider
+
+    def _fake_get(name):
+        if name == "tts":
+            return fake_provider
+        return orig(name)
+
+    return patch.object(registries, "get_tool_provider", _fake_get)
+
+
 def _make_voice_cli(**overrides):
     """Create a minimal HermesCLI with only voice-related attrs initialized.
 
@@ -1064,7 +1095,8 @@ class TestVoiceSpeakResponseReal:
     @patch("cli._cprint")
     def test_early_return_when_tts_off(self, _cp):
         cli = _make_voice_cli(_voice_tts=False)
-        with patch("hermes_agent_tts.tts_tool.text_to_speech_tool") as mock_tts:
+        mock_tts = MagicMock()
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
             cli._voice_speak_response("Hello")
             mock_tts.assert_not_called()
 
@@ -1074,10 +1106,11 @@ class TestVoiceSpeakResponseReal:
     @patch("cli.os.path.isfile", return_value=True)
     @patch("cli.os.makedirs")
     @patch("tools.voice_mode.play_audio_file")
-    @patch("hermes_agent_tts.tts_tool.text_to_speech_tool", return_value='{"success": true}')
-    def test_markdown_stripped(self, mock_tts, _play, _mkd, _isf, _gsz, _unl, _cp):
+    def test_markdown_stripped(self, _play, _mkd, _isf, _gsz, _unl, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        cli._voice_speak_response("## Title\n**bold** and `code`")
+        mock_tts = MagicMock(return_value='{"success": true}')
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
+            cli._voice_speak_response("## Title\n**bold** and `code`")
         call_text = mock_tts.call_args.kwargs["text"]
         assert "##" not in call_text
         assert "**" not in call_text
@@ -1085,10 +1118,11 @@ class TestVoiceSpeakResponseReal:
 
     @patch("cli._cprint")
     @patch("cli.os.makedirs")
-    @patch("hermes_agent_tts.tts_tool.text_to_speech_tool", return_value='{"success": true}')
-    def test_code_blocks_removed(self, mock_tts, _mkd, _cp):
+    def test_code_blocks_removed(self, _mkd, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        cli._voice_speak_response("```python\nprint('hi')\n```\nSome text")
+        mock_tts = MagicMock(return_value='{"success": true}')
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
+            cli._voice_speak_response("```python\nprint('hi')\n```\nSome text")
         call_text = mock_tts.call_args.kwargs["text"]
         assert "print" not in call_text
         assert "```" not in call_text
@@ -1098,26 +1132,29 @@ class TestVoiceSpeakResponseReal:
     @patch("cli.os.makedirs")
     def test_empty_after_strip_returns_early(self, _mkd, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        with patch("hermes_agent_tts.tts_tool.text_to_speech_tool") as mock_tts:
+        mock_tts = MagicMock()
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
             cli._voice_speak_response("```python\nprint('hi')\n```")
             mock_tts.assert_not_called()
 
     @patch("cli._cprint")
     @patch("cli.os.makedirs")
-    @patch("hermes_agent_tts.tts_tool.text_to_speech_tool", return_value='{"success": true}')
-    def test_long_text_truncated(self, mock_tts, _mkd, _cp):
+    def test_long_text_truncated(self, _mkd, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        cli._voice_speak_response("A" * 5000)
+        mock_tts = MagicMock(return_value='{"success": true}')
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
+            cli._voice_speak_response("A" * 5000)
         call_text = mock_tts.call_args.kwargs["text"]
         assert len(call_text) <= 4000
 
     @patch("cli._cprint")
     @patch("cli.os.makedirs")
-    @patch("hermes_agent_tts.tts_tool.text_to_speech_tool", side_effect=RuntimeError("tts fail"))
-    def test_exception_sets_done_event(self, _tts, _mkd, _cp):
+    def test_exception_sets_done_event(self, _mkd, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        cli._voice_tts_done.clear()
-        cli._voice_speak_response("Hello")
+        mock_tts = MagicMock(side_effect=RuntimeError("tts fail"))
+        with _patch_tts_provider(mock_tts_fn=mock_tts):
+            cli._voice_tts_done.clear()
+            cli._voice_speak_response("Hello")
         assert cli._voice_tts_done.is_set()
 
     @patch("cli._cprint")
@@ -1126,10 +1163,10 @@ class TestVoiceSpeakResponseReal:
     @patch("cli.os.path.isfile", return_value=True)
     @patch("cli.os.makedirs")
     @patch("tools.voice_mode.play_audio_file")
-    @patch("hermes_agent_tts.tts_tool.text_to_speech_tool", return_value='{"success": true}')
-    def test_play_audio_called(self, _tts, mock_play, _mkd, _isf, _gsz, _unl, _cp):
+    def test_play_audio_called(self, mock_play, _mkd, _isf, _gsz, _unl, _cp):
         cli = _make_voice_cli(_voice_tts=True)
-        cli._voice_speak_response("Hello world")
+        with _patch_tts_provider():
+            cli._voice_speak_response("Hello world")
         mock_play.assert_called_once()
 
 
