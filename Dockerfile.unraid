@@ -1,0 +1,80 @@
+# ---- node source stage ----
+FROM node:22-bookworm-slim AS node_source
+
+# ---- builder stage ----
+FROM debian:12-slim AS builder
+
+# System build deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3-pip \
+    gcc make g++ \
+    libffi-dev libssl-dev \
+    libolm-dev \
+    git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create venv
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install pip tools
+RUN pip install --upgrade pip setuptools wheel
+
+# Copy project files
+WORKDIR /opt/hermes
+COPY pyproject.toml uv.lock* ./
+COPY . .
+
+# Install all extras PLUS matrix (matrix is excluded from [all])
+RUN pip install -e ".[all,matrix]"
+
+# ---- runtime stage ----
+FROM debian:12-slim
+
+# Runtime system deps (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    ripgrep ffmpeg \
+    libolm3 \
+    tini \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 22 LTS from official image
+COPY --chmod=0755 --from=node_source /usr/local/bin/node /usr/local/bin/
+COPY --from=node_source /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node_source /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    ln -sf /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+
+# Copy venv and source from builder
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/hermes /opt/hermes
+
+ENV PATH="/opt/venv/bin:$PATH"
+ENV HERMES_HOME=/opt/data
+ENV PYTHONUNBUFFERED=1
+
+# Create hermes user (UID 10000, matching upstream convention)
+RUN groupadd -g 10000 hermes && \
+    useradd -u 10000 -g 10000 -d /opt/data -s /bin/bash hermes
+
+# Build web/TUI assets (non-fatal on failure — gateway still works without dashboard)
+WORKDIR /opt/hermes
+RUN if [ -d web ] && [ -f web/package.json ]; then \
+      cd web && npm install && npm run build || echo "[warn] web build failed (non-fatal)"; \
+    fi
+RUN if [ -d ui-tui ] && [ -f ui-tui/package.json ]; then \
+      cd ui-tui && npm install && npm run build || echo "[warn] ui-tui build failed (non-fatal)"; \
+    fi
+
+# Copy our entrypoint
+COPY docker/entrypoint.unraid.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+VOLUME ["/opt/data"]
+EXPOSE 8642
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+CMD ["gateway", "run"]
