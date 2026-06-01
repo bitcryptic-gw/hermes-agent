@@ -23,7 +23,7 @@ chown -R "${TARGET_UID}:${TARGET_GID}" /opt/data
 
 # For gateway run: require the env file to exist (secrets must not be in docker inspect)
 if [ "${1:-}" = "gateway" ] && [ "${2:-}" = "run" ]; then
-    ENV_FILE="/opt/data/.hermes.env"
+    ENV_FILE="/opt/data/.hermes/.env"
     if [ ! -f "$ENV_FILE" ]; then
         echo "[hermes-entrypoint] ERROR: ${ENV_FILE} not found." >&2
         echo "[hermes-entrypoint] Create it with your API keys before starting the gateway." >&2
