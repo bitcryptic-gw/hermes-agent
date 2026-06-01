@@ -26,7 +26,7 @@ COPY pyproject.toml uv.lock* ./
 COPY . .
 
 # Install all extras PLUS matrix (matrix is excluded from [all])
-RUN pip install -e ".[all,matrix]"
+RUN pip install -e ".[all,matrix]" && pip install 'anthropic>=0.39.0'
 
 # ---- runtime stage ----
 FROM debian:12-slim
@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libolm3 \
     tini \
     gosu \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 22 LTS from official image
