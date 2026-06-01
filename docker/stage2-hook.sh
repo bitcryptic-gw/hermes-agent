@@ -32,6 +32,14 @@ INSTALL_DIR="/opt/hermes"
 # is a no-op if the dir already exists. (#18482, salvages #18488)
 mkdir -p "$HERMES_HOME"
 
+# Numeric UID/GID validation: must be digits only, 1000-65534
+validate_uid_gid() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) [ "$1" -ge 1000 ] && [ "$1" -le 65534 ] ;;
+    esac
+}
+
 # --- UID/GID remap ---
 # Accept PUID/PGID as aliases for HERMES_UID/HERMES_GID.  NAS users (UGOS,
 # Synology, unRAID) expect the LinuxServer.io PUID/PGID convention and
@@ -42,11 +50,11 @@ mkdir -p "$HERMES_HOME"
 HERMES_UID="${HERMES_UID:-${PUID:-}}"
 HERMES_GID="${HERMES_GID:-${PGID:-}}"
 
-if [ -n "${HERMES_UID:-}" ] && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
+if [ -n "${HERMES_UID:-}" ] && validate_uid_gid "$HERMES_UID" && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
     echo "[stage2] Changing hermes UID to $HERMES_UID"
     usermod -u "$HERMES_UID" hermes
 fi
-if [ -n "${HERMES_GID:-}" ] && [ "$HERMES_GID" != "$(id -g hermes)" ]; then
+if [ -n "${HERMES_GID:-}" ] && validate_uid_gid "$HERMES_GID" && [ "$HERMES_GID" != "$(id -g hermes)" ]; then
     echo "[stage2] Changing hermes GID to $HERMES_GID"
     # -o allows non-unique GID (e.g. macOS GID 20 "staff" may already
     # exist as "dialout" in the Debian-based container image).
@@ -120,9 +128,7 @@ done
 # mkdir -p block below seeds. Keep them in sync if the seed list changes.
 actual_hermes_uid=$(id -u hermes)
 needs_chown=false
-if [ -n "${HERMES_UID:-}" ] && [ "$HERMES_UID" != "10000" ]; then
-    needs_chown=true
-elif [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null)" != "$actual_hermes_uid" ]; then
+if [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null)" != "$actual_hermes_uid" ]; then
     needs_chown=true
 fi
 if [ "$needs_chown" = true ]; then
