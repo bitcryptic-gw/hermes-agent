@@ -76,7 +76,7 @@ RUN set -eu; \
         "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-amd64"; \
     curl -fsSL -o /tmp/gosu-sha256 \
         "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/SHA256SUMS"; \
-    cd /usr/local/bin && grep gosu-amd64 /tmp/gosu-sha256 | sha256sum -c -; \
+    cd /usr/local/bin && grep " gosu-amd64$" /tmp/gosu-sha256 | sha256sum -c -; \
     chmod +x /usr/local/bin/gosu; \
     rm /tmp/gosu-sha256
 
