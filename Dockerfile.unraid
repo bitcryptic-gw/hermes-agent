@@ -90,8 +90,8 @@ COPY --from=builder /app /app
 
 # Create non-root hermes user (UID/GID mapped to PUID/PGID at runtime
 # via the entrypoint script).
-RUN addgroup --gid 1000 hermes && \
-    adduser --uid 1000 --gid 1000 --no-create-home --disabled-password --gecos "" hermes
+RUN groupadd --gid 1000 hermes && \
+    useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin hermes
 
 ENV HERMES_HOME=/opt/data \
     PATH="/app/.venv/bin:$PATH" \
