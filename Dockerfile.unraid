@@ -50,7 +50,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 
-RUN uv sync --frozen --no-install-project --extra all --extra matrix
+RUN uv sync --frozen --no-install-project --extra all --extra matrix --extra anthropic
 
 # Layer 2: copy source and install the project (editable).
 COPY . .
