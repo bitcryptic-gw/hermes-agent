@@ -1,0 +1,107 @@
+# syntax=docker/dockerfile:1
+# ───────────────────────────────────────────────────────────────
+# BitCryptic Unraid Dockerfile for hermes-agent
+#
+# Built against upstream v2026.6.5 (debian:13.4, Python 3.13, uv).
+# Two-stage build: builder compiles python-olm from source, runtime
+# is a slim image with tini + gosu (no s6-overlay).
+#
+# Platform: linux/amd64 only (Unraid).
+# ───────────────────────────────────────────────────────────────
+
+# ─── Builder stage ────────────────────────────────────────────
+FROM --platform=linux/amd64 debian:13.4-slim AS builder
+
+# Build-time dependencies for compiling python-olm (mautrix
+# transitive) and other native extensions.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        curl \
+        g++ \
+        gcc \
+        git \
+        libffi-dev \
+        libolm-dev \
+        make \
+        python3 \
+        python3-dev \
+        python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv from the official image (pinned for reproducibility).
+COPY --from=ghcr.io/astral-sh/uv:0.11.6 /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+
+WORKDIR /app
+
+# Layer 1: dependency resolution + install (cached unless
+# pyproject.toml or uv.lock change).
+#
+# Note: [all] extra does NOT include [matrix] (removed 2026-05-12 to
+# avoid python-olm build failures on Windows/macOS). We bake [matrix]
+# explicitly.  Upstream also bakes [messaging], [anthropic],
+# [bedrock], [azure-identity], [hindsight] — we start with [all] +
+# [matrix] and can add more extras as needed.
+COPY pyproject.toml uv.lock README.md ./
+# README.md is referenced by pyproject.toml's readme= field but is
+# excluded from the build context by .dockerignore's *.md rule.
+# uv's backend stats the readme path during dep resolution so we
+# touch an empty placeholder — the real README is restored below.
+RUN touch ./README.md
+
+RUN uv sync --frozen --no-install-project --extra all --extra matrix
+
+# ─── Runtime stage ────────────────────────────────────────────
+FROM --platform=linux/amd64 debian:13.4-slim AS runtime
+
+# Minimal runtime dependencies.
+# python3 is required because the venv's python binary is a symlink
+# to the system interpreter.
+# libolm3 is the shared library needed by python-olm at import time.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libolm3 \
+        python3 \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install gosu for privilege drop. gosu is not in Debian apt;
+# download from GitHub with checksum verification.
+ARG GOSU_VERSION=1.17
+RUN set -eu; \
+    curl -fsSL -o /usr/local/bin/gosu \
+        "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-amd64"; \
+    curl -fsSL -o /tmp/gosu-sha256 \
+        "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/SHA256SUMS"; \
+    cd /usr/local/bin && grep gosu-amd64 /tmp/gosu-sha256 | sha256sum -c -; \
+    chmod +x /usr/local/bin/gosu; \
+    rm /tmp/gosu-sha256
+
+# Copy the installed venv and source from the builder.
+COPY --from=builder /app /app
+
+# Install the project itself into the venv (editable, no-deps since
+# deps are already resolved in the uv sync layer above).
+WORKDIR /app
+RUN uv pip install --no-cache-dir --no-deps -e "."
+
+# Create non-root hermes user (UID/GID mapped to PUID/PGID at runtime
+# via the entrypoint script).
+RUN addgroup --gid 1000 hermes && \
+    adduser --uid 1000 --gid 1000 --no-create-home --disabled-password --gecos "" hermes
+
+ENV HERMES_HOME=/opt/data \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+RUN mkdir -p /opt/data
+VOLUME ["/opt/data"]
+EXPOSE 8642
+
+COPY docker/entrypoint.unraid.sh /app/docker/entrypoint.unraid.sh
+RUN chmod +x /app/docker/entrypoint.unraid.sh
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker/entrypoint.unraid.sh"]
+CMD ["gateway", "run"]
