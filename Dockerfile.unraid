@@ -72,11 +72,12 @@ RUN apt-get update && \
 # download from GitHub with checksum verification.
 ARG GOSU_VERSION=1.17
 RUN set -eu; \
-    curl -fsSL -o /usr/local/bin/gosu \
+    curl -fsSL -o /usr/local/bin/gosu-amd64 \
         "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-amd64"; \
     curl -fsSL -o /tmp/gosu-sha256 \
         "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/SHA256SUMS"; \
     cd /usr/local/bin && grep " gosu-amd64$" /tmp/gosu-sha256 | sha256sum -c -; \
+    mv /usr/local/bin/gosu-amd64 /usr/local/bin/gosu; \
     chmod +x /usr/local/bin/gosu; \
     rm /tmp/gosu-sha256
 
