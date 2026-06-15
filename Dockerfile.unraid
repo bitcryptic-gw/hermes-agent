@@ -52,6 +52,10 @@ RUN touch ./README.md
 
 RUN uv sync --frozen --no-install-project --extra all --extra matrix
 
+# Layer 2: copy source and install the project (editable).
+COPY . .
+RUN uv pip install --no-cache-dir --no-deps -e "."
+
 # ─── Runtime stage ────────────────────────────────────────────
 FROM --platform=linux/amd64 debian:13.4-slim AS runtime
 
@@ -81,13 +85,8 @@ RUN set -eu; \
     chmod +x /usr/local/bin/gosu; \
     rm /tmp/gosu-sha256
 
-# Copy the installed venv and source from the builder.
+# Copy the fully built venv and source from the builder.
 COPY --from=builder /app /app
-
-# Install the project itself into the venv (editable, no-deps since
-# deps are already resolved in the uv sync layer above).
-WORKDIR /app
-RUN uv pip install --no-cache-dir --no-deps -e "."
 
 # Create non-root hermes user (UID/GID mapped to PUID/PGID at runtime
 # via the entrypoint script).
