@@ -43,11 +43,11 @@ WORKDIR /app
 # explicitly.  Upstream also bakes [messaging], [anthropic],
 # [bedrock], [azure-identity], [hindsight] — we start with [all] +
 # [matrix] and can add more extras as needed.
-COPY pyproject.toml uv.lock README.md ./
 # README.md is referenced by pyproject.toml's readme= field but is
 # excluded from the build context by .dockerignore's *.md rule.
 # uv's backend stats the readme path during dep resolution so we
 # touch an empty placeholder — the real README is restored below.
+COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 
 RUN uv sync --frozen --no-install-project --extra all --extra matrix
